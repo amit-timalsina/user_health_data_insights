@@ -6,7 +6,7 @@ from typing import List
 from rolling_insights.services.insights.base import InsightService
 from rolling_insights.models import SleepMetrics, SleepInsightPayload, RawDataPoint
 from rolling_insights.analytics.statistics import calculate_sleep_stats
-from rolling_insights.exceptions.base import DataValidationError
+from rolling_insights.exceptions.data import DataValidationError
 
 
 class SleepInsightService(InsightService):
