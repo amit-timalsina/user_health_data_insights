@@ -5,5 +5,9 @@ the flow between models, analytics, and external integrations.
 """
 
 from .base import InsightService
+from .sleep_service import SleepInsightService
 
-__all__ = ("InsightService",)
+__all__ = (
+    "InsightService",
+    "SleepInsightService",
+)
