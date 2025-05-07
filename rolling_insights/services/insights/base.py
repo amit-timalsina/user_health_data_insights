@@ -1,7 +1,7 @@
 """Abstract base classes for insight services."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from rolling_insights.models.raw_data import RawDataPoint
 from rolling_insights.services.llm_service import LLMService
@@ -16,5 +16,5 @@ class InsightService(ABC):
         self.storage_service = storage_service
 
     @abstractmethod
-    async def execute(self, raw_data: RawDataPoint) -> Dict[str, Any]:
+    async def execute(self, raw_data: List[RawDataPoint]) -> Dict[str, Any]:
         """Execute the service to generate insights."""
