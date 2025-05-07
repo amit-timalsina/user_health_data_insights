@@ -5,5 +5,9 @@ between llm, storage, and analytics.
 """
 
 from .llm_service import LLMService
+from .json_file_service import JsonFileService
 
-__all__ = ("LLMService",)
+__all__ = [
+    "JsonFileService",
+    "LLMService",
+]
