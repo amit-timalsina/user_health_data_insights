@@ -95,7 +95,7 @@ class SleepInsightPayload(BaseInsightPayload):
                 "start_date": self.start_date.isoformat(),
                 "end_date": self.end_date.isoformat(),
             },
-            "stats": self.stats.dict(),
+            "stats": self.stats.model_dump(),
             "daily_data": self.daily_data,
             "narrative_insights": self.narrative_insights,
         }
@@ -114,7 +114,7 @@ class PhoneInsightPayload(BaseInsightPayload):
                 "start_date": self.start_date.isoformat(),
                 "end_date": self.end_date.isoformat(),
             },
-            "stats": self.stats.dict(),
+            "stats": self.stats.model_dump(),
             "daily_data": self.daily_data,
             "narrative_insights": self.narrative_insights,
         }
@@ -133,7 +133,7 @@ class HealthInsightPayload(BaseInsightPayload):
                 "start_date": self.start_date.isoformat(),
                 "end_date": self.end_date.isoformat(),
             },
-            "stats": self.stats.dict(),
+            "stats": self.stats.model_dump(),
             "daily_data": self.daily_data,
             "narrative_insights": self.narrative_insights,
         }
