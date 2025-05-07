@@ -8,17 +8,9 @@ import os
 import json
 import logging
 from typing import Optional, cast, Any
+from openai import AsyncOpenAI
 
-# The OpenAI import is guarded to make testing easier
-try:
-    from openai import AsyncOpenAI
-
-    OPENAI_AVAILABLE = True
-except ModuleNotFoundError:  # pragma: no cover
-    AsyncOpenAI = None  # type: ignore
-    OPENAI_AVAILABLE = False
-
-from ..models import SleepStats, PhoneStats, HealthStats
+from rolling_insights.models import SleepStats, PhoneStats, HealthStats
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +30,7 @@ class LLMService:
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
         self.model = model or os.getenv("OPENAI_MODEL", self.DEFAULT_MODEL)
 
-        if OPENAI_AVAILABLE and self.api_key:
+        if self.api_key:
             self.client = AsyncOpenAI(api_key=self.api_key)
         else:
             self.client = None
