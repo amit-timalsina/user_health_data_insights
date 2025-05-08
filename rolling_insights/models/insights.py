@@ -5,7 +5,7 @@ Insights system.
 
 from datetime import date
 from typing import List, Dict, Any, Union
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SleepStats(BaseModel):
@@ -27,6 +27,32 @@ class SleepStats(BaseModel):
     rem_sleep_percentile: float = 0.0
     sleep_efficiency_percentile: float = 0.0
     sleep_quality_score: float = 0.0  # Composite score based on multiple metrics
+    # New trend analysis fields
+    total_sleep_trend: float = 0.0  # Slope of the trend line
+    total_sleep_trend_significant: bool = (
+        False  # Whether trend is statistically significant
+    )
+    deep_sleep_trend: float = 0.0
+    deep_sleep_trend_significant: bool = False
+    rem_sleep_trend: float = 0.0
+    rem_sleep_trend_significant: bool = False
+    # Outlier detection
+    has_outlier_nights: bool = False  # Whether any outlier nights were detected
+    outlier_night_indices: List[int] = Field(
+        default_factory=list
+    )  # Indices of outlier nights
+
+
+class InsightItem(BaseModel):
+    """Represents a statistically significant correlation with contextual information."""
+
+    name: str  # Name/identifier of the correlation
+    correlation: float  # Correlation coefficient value
+    p_value: float  # Statistical significance (p-value)
+    strength: str  # Qualitative description (weak, moderate, strong, very strong)
+    direction: str  # positive or negative
+    variance_explained: float  # Percentage of variance explained (R-squared * 100)
+    importance_score: float  # Metric for ranking insights
 
 
 class PhoneStats(BaseModel):
@@ -46,6 +72,18 @@ class PhoneStats(BaseModel):
     screen_before_bed_rem_sleep_correlation: float = 0.0
     pickups_sleep_correlation: float = 0.0
     morning_pickup_sleep_quality_correlation: float = 0.0
+    # New trend analysis fields
+    screen_time_trend: float = 0.0  # Slope of screen time trend
+    screen_time_trend_significant: bool = (
+        False  # Whether trend is statistically significant
+    )
+    # Additional range statistics
+    screen_time_min: float = 0.0
+    screen_time_max: float = 0.0
+    pickups_min: float = 0.0
+    pickups_max: float = 0.0
+    # Key insights
+    key_phone_insights: List[InsightItem] = Field(default_factory=list)
 
 
 class HealthStats(BaseModel):
@@ -65,6 +103,20 @@ class HealthStats(BaseModel):
     activity_intensity_score: float = (
         0.0  # Activity intensity relative to recommended values
     )
+    # New trend analysis fields
+    steps_trend: float = 0.0  # Slope of steps trend
+    steps_trend_significant: bool = False  # Whether trend is statistically significant
+    activity_trend: float = 0.0  # Slope of activity trend
+    activity_trend_significant: bool = (
+        False  # Whether trend is statistically significant
+    )
+    # Additional range statistics
+    steps_min: float = 0.0
+    steps_max: float = 0.0
+    activity_min: float = 0.0
+    activity_max: float = 0.0
+    # Key insights
+    key_health_insights: List[InsightItem] = Field(default_factory=list)
 
 
 class InsightPeriod(BaseModel):

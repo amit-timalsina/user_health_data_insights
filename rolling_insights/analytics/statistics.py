@@ -1,11 +1,11 @@
 """Statistical analysis functions for Rolling Insights.
 
-Pure functions for statistical calculations and analysis with no side effects
-or dependencies on external frameworks.
+Advanced statistical calculations for meaningful sleep, phone, and health insights.
 """
 
-from typing import List, Optional, TypeVar, Dict
+from typing import List, Optional, TypeVar, Dict, Tuple, Any, cast, TypedDict
 import numpy as np
+from scipy import stats  # type: ignore[import-untyped]
 from rolling_insights.models import (
     SleepMetrics,
     PhoneMetrics,
@@ -13,6 +13,7 @@ from rolling_insights.models import (
     SleepStats,
     PhoneStats,
     HealthStats,
+    InsightItem,
 )
 
 
@@ -42,7 +43,7 @@ SLEEP_QUALITY_WEIGHTS = {
 # Sleep quality thresholds
 SLEEP_QUALITY_THRESHOLDS = {
     # Efficiency scoring thresholds (research shows 80% is minimum healthy)
-    "min_efficiency": 0.80,  # Minimum acceptable efficiency (was 0.7)
+    "min_efficiency": 0.80,  # Minimum acceptable efficiency
     "optimal_efficiency": 0.95,  # Optimal efficiency target
     # Deep sleep scoring (percentage of total sleep)
     "min_deep_sleep_pct": 13.0,  # Min percentage for healthy deep sleep
@@ -62,23 +63,37 @@ ACTIVITY_BENCHMARKS = {
     "calories_weight": 0.4,  # Weight given to calories in activity score
 }
 
+# Correlation strength thresholds for insights
+CORRELATION_STRENGTH = {
+    "weak": 0.2,
+    "moderate": 0.4,
+    "strong": 0.6,
+    "very_strong": 0.8,
+}
 
-def calculate_correlation(x: List[float], y: List[float]) -> Optional[float]:
-    """Calculate Pearson correlation coefficient between two series."""
+# Statistical significance threshold (p-value)
+SIGNIFICANCE_THRESHOLD = 0.1  # More permissive for small sample size (7 days)
+
+
+def calculate_correlation(
+    x: List[float], y: List[float]
+) -> Tuple[Optional[float], Optional[float]]:
+    """Calculate Pearson correlation coefficient between two series with p-value.
+
+    Returns:
+        Tuple containing (correlation coefficient, p-value)
+    """
     if len(x) != len(y) or len(x) < 2:
-        return None
+        return None, None
 
-    # Convert to numpy arrays for vectorized operations
-    x_arr = np.array(x)
-    y_arr = np.array(y)
+    # Convert to numpy arrays for better statistical computation
+    x_arr = np.array(x, dtype=float)
+    y_arr = np.array(y, dtype=float)
 
-    # Use numpy's corrcoef function which returns a correlation matrix
-    # We want the off-diagonal element [0,1] which is the correlation between x and y
-    corr_matrix = np.corrcoef(x_arr, y_arr)
-    if np.isnan(corr_matrix[0, 1]):
-        return None
+    # Calculate correlation and p-value
+    corr, p_value = stats.pearsonr(x_arr, y_arr)
 
-    return corr_matrix[0, 1]
+    return corr, p_value
 
 
 def calculate_variance_explained(x: List[float], y: List[float]) -> float:
@@ -86,18 +101,59 @@ def calculate_variance_explained(x: List[float], y: List[float]) -> float:
 
     This represents the proportion of variance in y explained by x.
     """
-    corr = calculate_correlation(x, y)
+    corr, _ = calculate_correlation(x, y)
     if corr is None:
         return 0.0
     # R-squared is the square of the correlation coefficient
     return corr**2
 
 
+def detect_trend(data: List[float]) -> Tuple[float, float, bool]:
+    """Detect if there's a significant trend in time series data.
+
+    Returns:
+        Tuple containing (slope, p-value, is_significant)
+    """
+    if len(data) < 3:
+        return 0.0, 1.0, False
+
+    # Use linear regression to detect trend
+    x = np.arange(len(data))
+    y = np.array(data)
+
+    slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+    is_significant = p_value < SIGNIFICANCE_THRESHOLD
+
+    return slope, p_value, is_significant
+
+
+def detect_outliers(data: List[float], threshold: float = 1.5) -> List[int]:
+    """Detect outliers in a data series using IQR method.
+
+    Args:
+        data: List of values to check for outliers
+        threshold: IQR multiplier (default 1.5)
+
+    Returns:
+        List of indices where outliers are found
+    """
+    if len(data) < 4:  # Need reasonable sample size
+        return []
+
+    q1, q3 = np.percentile(data, [25, 75])
+    iqr = q3 - q1
+
+    lower_bound = q1 - threshold * iqr
+    upper_bound = q3 + threshold * iqr
+
+    outliers = [i for i, x in enumerate(data) if x < lower_bound or x > upper_bound]
+    return outliers
+
+
 def calculate_percentile(value: float, benchmark: BenchmarkType) -> float:
     """Calculate approximate percentile ranking based on benchmarks.
 
-    This is a simplified approach using min, median, and max values from benchmarks
-    to approximate where a value falls within a typical distribution.
+    Uses a more sophisticated interpolation based on population distribution.
     """
     min_val = benchmark["min"]
     max_val = benchmark["max"]
@@ -109,12 +165,18 @@ def calculate_percentile(value: float, benchmark: BenchmarkType) -> float:
     if value >= max_val:
         return 100.0
 
-    # For values below median
+    # For values below median - use a slightly curved distribution
     if value < median:
-        return 50.0 * (value - min_val) / (median - min_val)
+        # Non-linear scaling to better approximate actual population distribution
+        # Uses a power function to create a more realistic curve
+        normalized_value = (value - min_val) / (median - min_val)
+        percentile = 50.0 * np.power(normalized_value, 0.9)
+        return percentile
 
     # For values above median
-    return 50.0 + 50.0 * (value - median) / (max_val - median)
+    normalized_value = (value - median) / (max_val - median)
+    percentile = 50.0 + 50.0 * np.power(normalized_value, 1.1)
+    return percentile
 
 
 def calculate_sleep_quality_score(stats: Dict[str, float]) -> float:
@@ -129,45 +191,41 @@ def calculate_sleep_quality_score(stats: Dict[str, float]) -> float:
     # Calculate component scores (0-100 scale)
     # Efficiency score: Linear scaling from min_efficiency to optimal_efficiency
     efficiency_range = thresholds["optimal_efficiency"] - thresholds["min_efficiency"]
-    efficiency_score = min(
-        100,
-        max(
-            0,
+    efficiency_score = np.clip(
+        (
             (stats["avg_sleep_efficiency"] - thresholds["min_efficiency"])
-            * (100 / efficiency_range),
+            * (100 / efficiency_range)
         ),
+        0,
+        100,
     )
 
     # Deep sleep score: Linear scaling from min to optimal percentage
     deep_sleep_range = (
         thresholds["optimal_deep_sleep_pct"] - thresholds["min_deep_sleep_pct"]
     )
-    deep_score = min(
+    deep_score = np.clip(
+        (
+            (stats["deep_sleep_percentage"] - thresholds["min_deep_sleep_pct"])
+            / deep_sleep_range
+        )
+        * 100,
+        0,
         100,
-        max(
-            0,
-            (
-                (stats["deep_sleep_percentage"] - thresholds["min_deep_sleep_pct"])
-                / deep_sleep_range
-            )
-            * 100,
-        ),
     )
 
     # REM sleep score: Linear scaling from min to optimal percentage
     rem_sleep_range = (
         thresholds["optimal_rem_sleep_pct"] - thresholds["min_rem_sleep_pct"]
     )
-    rem_score = min(
+    rem_score = np.clip(
+        (
+            (stats["rem_sleep_percentage"] - thresholds["min_rem_sleep_pct"])
+            / rem_sleep_range
+        )
+        * 100,
+        0,
         100,
-        max(
-            0,
-            (
-                (stats["rem_sleep_percentage"] - thresholds["min_rem_sleep_pct"])
-                / rem_sleep_range
-            )
-            * 100,
-        ),
     )
 
     # Consistency score: Lower variability is better (up to the defined threshold)
@@ -198,36 +256,149 @@ def calculate_activity_intensity_score(avg_steps: float, avg_calories: float) ->
     steps_weight = ACTIVITY_BENCHMARKS["steps_weight"]
     calories_weight = ACTIVITY_BENCHMARKS["calories_weight"]
 
-    # Calculate component scores
-    steps_score = min(100, (avg_steps / recommended_steps) * 100)
-    calorie_score = min(100, (avg_calories / recommended_active_calories) * 100)
+    # Calculate component scores using a more nuanced approach
+    # Uses a modified sigmoid function to give diminishing returns for very high values
+    # and steeper penalties for very low values
+
+    # Steps score (ranges from 0-100)
+    steps_ratio = avg_steps / recommended_steps
+    steps_score = np.minimum(100, 100 * (1 / (1 + np.exp(-5 * (steps_ratio - 0.5)))))
+
+    # Calorie score (ranges from 0-100)
+    calorie_ratio = avg_calories / recommended_active_calories
+    calorie_score = np.minimum(
+        100, 100 * (1 / (1 + np.exp(-5 * (calorie_ratio - 0.5))))
+    )
 
     # Combined score with weighted components
     return (steps_weight * steps_score) + (calories_weight * calorie_score)
 
 
+class InsightDict(TypedDict):
+    """Type definition for insight dictionary."""
+
+    name: str
+    correlation: float
+    p_value: float
+    strength: str
+    direction: str
+    variance_explained: float
+    importance_score: float
+
+
+def find_key_insights(
+    corr_dict: Dict[str, float], p_values: Dict[str, float]
+) -> List[InsightDict]:
+    """Find statistically significant correlations from a dictionary.
+
+    Args:
+        corr_dict: Dictionary of correlation names and values
+        p_values: Dictionary of corresponding p-values
+
+    Returns:
+        List of dictionaries with key insights, sorted by significance
+    """
+    insights: List[InsightDict] = []
+
+    for name, corr in corr_dict.items():
+        if name in p_values and abs(corr) > CORRELATION_STRENGTH["weak"]:
+            p_val = p_values[name]
+            is_significant = p_val < SIGNIFICANCE_THRESHOLD
+
+            if is_significant:
+                # Determine strength description
+                if abs(corr) >= CORRELATION_STRENGTH["very_strong"]:
+                    strength = "very strong"
+                elif abs(corr) >= CORRELATION_STRENGTH["strong"]:
+                    strength = "strong"
+                elif abs(corr) >= CORRELATION_STRENGTH["moderate"]:
+                    strength = "moderate"
+                else:
+                    strength = "weak"
+
+                # Determine direction
+                direction = "positive" if corr > 0 else "negative"
+
+                # Variance explained
+                variance_explained = corr**2 * 100  # percentage
+
+                insights.append(
+                    {
+                        "name": name,
+                        "correlation": corr,
+                        "p_value": p_val,
+                        "strength": strength,
+                        "direction": direction,
+                        "variance_explained": variance_explained,
+                        "importance_score": abs(corr) * (1 - p_val),  # For sorting
+                    }
+                )
+
+    # Sort by importance score (strong correlations with low p-values)
+    insights.sort(key=lambda x: x["importance_score"], reverse=True)
+    return insights
+
+
+class SleepStatsDict(TypedDict):
+    """Type definition for sleep stats dictionary to pass to SleepStats."""
+
+    avg_total_sleep_minutes: float
+    avg_deep_sleep_minutes: float
+    avg_rem_sleep_minutes: float
+    avg_light_sleep_minutes: float
+    avg_sleep_efficiency: float
+    min_total_sleep_minutes: float
+    max_total_sleep_minutes: float
+    deep_sleep_percentage: float
+    rem_sleep_percentage: float
+    light_sleep_percentage: float
+    sleep_duration_variability: float
+    deep_sleep_percentile: float
+    rem_sleep_percentile: float
+    sleep_efficiency_percentile: float
+    total_sleep_trend: float
+    total_sleep_trend_significant: bool
+    deep_sleep_trend: float
+    deep_sleep_trend_significant: bool
+    rem_sleep_trend: float
+    rem_sleep_trend_significant: bool
+    has_outlier_nights: bool
+    outlier_night_indices: List[int]
+    sleep_quality_score: float
+
+
 def calculate_sleep_stats(metrics: List[SleepMetrics]) -> SleepStats:
     """Calculate statistical measures from sleep metrics."""
+    # Extract metrics
     tot = [m.total_sleep_minutes for m in metrics]
     deep = [m.deep_sleep_minutes for m in metrics]
     rem = [m.rem_sleep_minutes for m in metrics]
     light = [m.light_sleep_minutes for m in metrics]
     eff = [m.sleep_efficiency for m in metrics]
 
-    # Convert to numpy arrays for vectorized operations
+    # Convert to numpy arrays for better calculations
     tot_arr = np.array(tot)
     deep_arr = np.array(deep)
     rem_arr = np.array(rem)
     light_arr = np.array(light)
     eff_arr = np.array(eff)
 
+    # Calculate percentages
     total_minutes = np.sum(tot_arr)
-    deep_sleep_pct = np.sum(deep_arr) / total_minutes * 100 if total_minutes else 0
-    rem_sleep_pct = np.sum(rem_arr) / total_minutes * 100 if total_minutes else 0
-    light_sleep_pct = np.sum(light_arr) / total_minutes * 100 if total_minutes else 0
+    deep_sleep_pct = (np.sum(deep_arr) / total_minutes * 100) if total_minutes else 0
+    rem_sleep_pct = (np.sum(rem_arr) / total_minutes * 100) if total_minutes else 0
+    light_sleep_pct = (np.sum(light_arr) / total_minutes * 100) if total_minutes else 0
 
     # Calculate sleep duration variability (standard deviation)
     sleep_duration_variability = np.std(tot_arr, ddof=1) if len(tot) > 1 else 0.0
+
+    # Detect trends
+    total_trend, total_p, total_significant = detect_trend(tot)
+    deep_trend, deep_p, deep_significant = detect_trend(deep)
+    rem_trend, rem_p, rem_significant = detect_trend(rem)
+
+    # Find outliers
+    tot_outliers = detect_outliers(tot)
 
     # Calculate percentile rankings
     deep_sleep_percentile = calculate_percentile(
@@ -237,136 +408,315 @@ def calculate_sleep_stats(metrics: List[SleepMetrics]) -> SleepStats:
         rem_sleep_pct, SLEEP_BENCHMARKS["rem_sleep_percentage"]
     )
     sleep_efficiency_percentile = calculate_percentile(
-        np.mean(eff_arr), SLEEP_BENCHMARKS["sleep_efficiency"]
+        float(np.mean(eff_arr)), SLEEP_BENCHMARKS["sleep_efficiency"]
     )
 
-    stats_dict = {
-        "avg_total_sleep_minutes": np.mean(tot_arr),
-        "avg_deep_sleep_minutes": np.mean(deep_arr),
-        "avg_rem_sleep_minutes": np.mean(rem_arr),
-        "avg_light_sleep_minutes": np.mean(light_arr),
-        "avg_sleep_efficiency": np.mean(eff_arr),
-        "min_total_sleep_minutes": np.min(tot_arr),
-        "max_total_sleep_minutes": np.max(tot_arr),
-        "deep_sleep_percentage": deep_sleep_pct,
-        "rem_sleep_percentage": rem_sleep_pct,
-        "light_sleep_percentage": light_sleep_pct,
-        "sleep_duration_variability": sleep_duration_variability,
-        "deep_sleep_percentile": deep_sleep_percentile,
-        "rem_sleep_percentile": rem_sleep_percentile,
-        "sleep_efficiency_percentile": sleep_efficiency_percentile,
+    # Create a dictionary with the right types for the model
+    stats_dict: Dict[str, Any] = {
+        "avg_total_sleep_minutes": float(np.mean(tot_arr)),
+        "avg_deep_sleep_minutes": float(np.mean(deep_arr)),
+        "avg_rem_sleep_minutes": float(np.mean(rem_arr)),
+        "avg_light_sleep_minutes": float(np.mean(light_arr)),
+        "avg_sleep_efficiency": float(np.mean(eff_arr)),
+        "min_total_sleep_minutes": float(np.min(tot_arr)),
+        "max_total_sleep_minutes": float(np.max(tot_arr)),
+        "deep_sleep_percentage": float(deep_sleep_pct),
+        "rem_sleep_percentage": float(rem_sleep_pct),
+        "light_sleep_percentage": float(light_sleep_pct),
+        "sleep_duration_variability": float(sleep_duration_variability),
+        "deep_sleep_percentile": float(deep_sleep_percentile),
+        "rem_sleep_percentile": float(rem_sleep_percentile),
+        "sleep_efficiency_percentile": float(sleep_efficiency_percentile),
+        # Add trend data
+        "total_sleep_trend": float(total_trend),
+        "total_sleep_trend_significant": bool(total_significant),
+        "deep_sleep_trend": float(deep_trend),
+        "deep_sleep_trend_significant": bool(deep_significant),
+        "rem_sleep_trend": float(rem_trend),
+        "rem_sleep_trend_significant": bool(rem_significant),
+        # Add outlier detection
+        "has_outlier_nights": bool(len(tot_outliers) > 0),
+        "outlier_night_indices": list(tot_outliers),
     }
 
     # Calculate the composite sleep quality score
-    sleep_quality_score = calculate_sleep_quality_score(stats_dict)
+    # Create a filtered dict with only float values for the sleep quality function
+    sleep_quality_dict = {
+        k: float(v)
+        for k, v in stats_dict.items()
+        if k
+        in [
+            "avg_sleep_efficiency",
+            "deep_sleep_percentage",
+            "rem_sleep_percentage",
+            "sleep_duration_variability",
+        ]
+    }
+    sleep_quality_score = calculate_sleep_quality_score(
+        cast(Dict[str, float], sleep_quality_dict)
+    )
     stats_dict["sleep_quality_score"] = sleep_quality_score
 
-    return SleepStats(**stats_dict)
+    # Cast the dict to the properly typed dict and pass to SleepStats
+    typed_dict = cast(SleepStatsDict, stats_dict)
+    return SleepStats(**typed_dict)
+
+
+class PhoneStatsDict(TypedDict):
+    """Type definition for phone stats dictionary to pass to PhoneStats."""
+
+    avg_screen_time_minutes: float
+    avg_pickups: float
+    avg_screen_before_bed_minutes: float
+    total_screen_time_minutes: int
+    total_pickups: int
+    screen_before_bed_total_sleep_correlation: float
+    screen_before_bed_deep_sleep_correlation: float
+    screen_before_bed_total_sleep_variance_explained: float
+    screen_before_bed_deep_sleep_variance_explained: float
+    screen_time_percentile: float
+    screen_before_bed_rem_sleep_correlation: float
+    pickups_sleep_correlation: float
+    morning_pickup_sleep_quality_correlation: float
+    screen_time_trend: float
+    screen_time_trend_significant: bool
+    screen_time_min: float
+    screen_time_max: float
+    pickups_min: float
+    pickups_max: float
+    key_phone_insights: List[InsightItem]
+
+
+class HealthStatsDict(TypedDict):
+    """Type definition for health stats dictionary to pass to HealthStats."""
+
+    avg_steps: float
+    avg_active_energy_burned: float
+    total_steps: int
+    total_active_energy_burned: float
+    steps_total_sleep_correlation: float
+    activity_deep_sleep_correlation: float
+    activity_deep_sleep_variance_explained: float
+    steps_sleep_efficiency_correlation: float
+    activity_rem_sleep_correlation: float
+    day_to_day_activity_variability: float
+    activity_intensity_score: float
+    steps_trend: float
+    steps_trend_significant: bool
+    activity_trend: float
+    activity_trend_significant: bool
+    steps_min: float
+    steps_max: float
+    activity_min: float
+    activity_max: float
+    key_health_insights: List[InsightItem]
 
 
 def calculate_phone_stats(
     metrics: List[PhoneMetrics], sleep_metrics: List[SleepMetrics]
 ) -> PhoneStats:
     """Calculate statistical measures from phone usage metrics."""
-    screen = [float(m.screen_time_minutes) for m in metrics]
-    pickups = [float(m.pickups) for m in metrics]
-    screen_bed = [float(m.screen_time_before_bed_minutes) for m in metrics]
-    first_pickup = [float(m.first_pickup_after_wakeup_minutes) for m in metrics]
+    # Extract metrics as numpy arrays
+    screen = np.array([float(m.screen_time_minutes) for m in metrics])
+    pickups = np.array([float(m.pickups) for m in metrics])
+    screen_bed = np.array([float(m.screen_time_before_bed_minutes) for m in metrics])
+    first_pickup = np.array(
+        [float(m.first_pickup_after_wakeup_minutes) for m in metrics]
+    )
 
-    # Convert to numpy arrays
-    screen_arr = np.array(screen)
-    pickups_arr = np.array(pickups)
-    screen_bed_arr = np.array(screen_bed)
+    # Extract sleep metrics
+    total_sleep = np.array([m.total_sleep_minutes for m in sleep_metrics])
+    deep_sleep = np.array([m.deep_sleep_minutes for m in sleep_metrics])
+    rem_sleep = np.array([m.rem_sleep_minutes for m in sleep_metrics])
+    sleep_efficiency = np.array([m.sleep_efficiency for m in sleep_metrics])
 
-    # Calculate correlations with sleep
-    total_sleep = [m.total_sleep_minutes for m in sleep_metrics]
-    deep_sleep = [m.deep_sleep_minutes for m in sleep_metrics]
-    rem_sleep = [m.rem_sleep_minutes for m in sleep_metrics]
-    sleep_efficiency = [m.sleep_efficiency for m in sleep_metrics]
+    # Calculate correlations with p-values
+    correlations: Dict[str, float] = {}
+    p_values: Dict[str, float] = {}
 
     # Screen time before bed correlations
-    screen_bed_total_corr = calculate_correlation(screen_bed, total_sleep) or 0
-    screen_bed_deep_corr = calculate_correlation(screen_bed, deep_sleep) or 0
-    screen_bed_rem_corr = calculate_correlation(screen_bed, rem_sleep) or 0
+    screen_bed_total_corr, screen_bed_total_p = calculate_correlation(
+        screen_bed.tolist(), total_sleep.tolist()
+    )
+    screen_bed_deep_corr, screen_bed_deep_p = calculate_correlation(
+        screen_bed.tolist(), deep_sleep.tolist()
+    )
+    screen_bed_rem_corr, screen_bed_rem_p = calculate_correlation(
+        screen_bed.tolist(), rem_sleep.tolist()
+    )
+
+    correlations["screen_time_before_bed_total_sleep"] = screen_bed_total_corr or 0
+    correlations["screen_time_before_bed_deep_sleep"] = screen_bed_deep_corr or 0
+    correlations["screen_time_before_bed_rem_sleep"] = screen_bed_rem_corr or 0
+
+    p_values["screen_time_before_bed_total_sleep"] = screen_bed_total_p or 1.0
+    p_values["screen_time_before_bed_deep_sleep"] = screen_bed_deep_p or 1.0
+    p_values["screen_time_before_bed_rem_sleep"] = screen_bed_rem_p or 1.0
 
     # Other correlations
-    pickups_sleep_corr = calculate_correlation(pickups, total_sleep) or 0
-    morning_pickup_corr = calculate_correlation(first_pickup, sleep_efficiency) or 0
+    pickups_sleep_corr, pickups_sleep_p = calculate_correlation(
+        pickups.tolist(), total_sleep.tolist()
+    )
+    morning_pickup_corr, morning_pickup_p = calculate_correlation(
+        first_pickup.tolist(), sleep_efficiency.tolist()
+    )
 
-    # Calculate variance explained (R-squared)
-    screen_bed_total_variance = calculate_variance_explained(screen_bed, total_sleep)
-    screen_bed_deep_variance = calculate_variance_explained(screen_bed, deep_sleep)
+    correlations["pickups_total_sleep"] = pickups_sleep_corr or 0
+    correlations["morning_pickup_sleep_efficiency"] = morning_pickup_corr or 0
+
+    p_values["pickups_total_sleep"] = pickups_sleep_p or 1.0
+    p_values["morning_pickup_sleep_efficiency"] = morning_pickup_p or 1.0
+
+    # Identify key insights from correlations
+    key_insights_dicts = find_key_insights(correlations, p_values)
+    key_insights = [InsightItem(**insight) for insight in key_insights_dicts[:3]]
+
+    # Calculate variance explained
+    screen_bed_total_variance = calculate_variance_explained(
+        screen_bed.tolist(), total_sleep.tolist()
+    )
+    screen_bed_deep_variance = calculate_variance_explained(
+        screen_bed.tolist(), deep_sleep.tolist()
+    )
+
+    # Calculate trends
+    screen_trend, screen_trend_p, screen_trend_significant = detect_trend(
+        screen.tolist()
+    )
 
     # Calculate screen time percentile
     screen_time_percentile = calculate_percentile(
-        np.mean(screen_arr), SLEEP_BENCHMARKS["screen_time_minutes"]
+        float(np.mean(screen)), SLEEP_BENCHMARKS["screen_time_minutes"]
     )
 
-    return PhoneStats(
-        avg_screen_time_minutes=np.mean(screen_arr),
-        avg_pickups=np.mean(pickups_arr),
-        avg_screen_before_bed_minutes=np.mean(screen_bed_arr),
-        total_screen_time_minutes=np.sum(screen_arr),
-        total_pickups=int(np.sum(pickups_arr)),
-        screen_before_bed_total_sleep_correlation=screen_bed_total_corr,
-        screen_before_bed_deep_sleep_correlation=screen_bed_deep_corr,
-        screen_before_bed_total_sleep_variance_explained=screen_bed_total_variance,
-        screen_before_bed_deep_sleep_variance_explained=screen_bed_deep_variance,
-        screen_time_percentile=screen_time_percentile,
-        screen_before_bed_rem_sleep_correlation=screen_bed_rem_corr,
-        pickups_sleep_correlation=pickups_sleep_corr,
-        morning_pickup_sleep_quality_correlation=morning_pickup_corr,
-    )
+    # Build the stats dictionary with proper typing
+    stats_dict: PhoneStatsDict = {
+        "avg_screen_time_minutes": float(np.mean(screen)),
+        "avg_pickups": float(np.mean(pickups)),
+        "avg_screen_before_bed_minutes": float(np.mean(screen_bed)),
+        "total_screen_time_minutes": int(np.sum(screen)),
+        "total_pickups": int(np.sum(pickups)),
+        "screen_before_bed_total_sleep_correlation": correlations[
+            "screen_time_before_bed_total_sleep"
+        ],
+        "screen_before_bed_deep_sleep_correlation": correlations[
+            "screen_time_before_bed_deep_sleep"
+        ],
+        "screen_before_bed_total_sleep_variance_explained": screen_bed_total_variance,
+        "screen_before_bed_deep_sleep_variance_explained": screen_bed_deep_variance,
+        "screen_time_percentile": screen_time_percentile,
+        "screen_before_bed_rem_sleep_correlation": correlations[
+            "screen_time_before_bed_rem_sleep"
+        ],
+        "pickups_sleep_correlation": correlations["pickups_total_sleep"],
+        "morning_pickup_sleep_quality_correlation": correlations[
+            "morning_pickup_sleep_efficiency"
+        ],
+        # Additional statistics
+        "screen_time_trend": float(screen_trend),
+        "screen_time_trend_significant": bool(screen_trend_significant),
+        "screen_time_min": float(np.min(screen)),
+        "screen_time_max": float(np.max(screen)),
+        "pickups_min": float(np.min(pickups)),
+        "pickups_max": float(np.max(pickups)),
+        "key_phone_insights": key_insights,
+    }
+
+    return PhoneStats(**stats_dict)
 
 
 def calculate_health_stats(
     metrics: List[HealthMetrics], sleep_metrics: List[SleepMetrics]
 ) -> HealthStats:
     """Calculate statistical measures from health metrics."""
-    steps = [float(m.total_steps) for m in metrics]
-    active = [float(m.active_energy_burned) for m in metrics]
+    # Extract metrics as numpy arrays
+    steps = np.array([float(m.total_steps) for m in metrics])
+    active = np.array([float(m.active_energy_burned) for m in metrics])
 
-    # Convert to numpy arrays
-    steps_arr = np.array(steps)
-    active_arr = np.array(active)
+    # Extract sleep metrics
+    total_sleep = np.array([m.total_sleep_minutes for m in sleep_metrics])
+    deep_sleep = np.array([m.deep_sleep_minutes for m in sleep_metrics])
+    rem_sleep = np.array([m.rem_sleep_minutes for m in sleep_metrics])
+    sleep_efficiency = np.array([m.sleep_efficiency for m in sleep_metrics])
 
-    # Calculate correlations with sleep
-    total_sleep = [m.total_sleep_minutes for m in sleep_metrics]
-    deep_sleep = [m.deep_sleep_minutes for m in sleep_metrics]
-    rem_sleep = [m.rem_sleep_minutes for m in sleep_metrics]
-    sleep_efficiency = [m.sleep_efficiency for m in sleep_metrics]
+    # Calculate correlations with p-values
+    correlations: Dict[str, float] = {}
+    p_values: Dict[str, float] = {}
 
-    # Basic correlations
-    steps_sleep_corr = calculate_correlation(steps, total_sleep) or 0
-    activity_deep_corr = calculate_correlation(active, deep_sleep) or 0
+    # Steps correlations
+    steps_sleep_corr, steps_sleep_p = calculate_correlation(
+        steps.tolist(), total_sleep.tolist()
+    )
+    steps_efficiency_corr, steps_efficiency_p = calculate_correlation(
+        steps.tolist(), sleep_efficiency.tolist()
+    )
 
-    # Additional correlations
-    steps_efficiency_corr = calculate_correlation(steps, sleep_efficiency) or 0
-    activity_rem_corr = calculate_correlation(active, rem_sleep) or 0
+    correlations["steps_total_sleep"] = steps_sleep_corr or 0
+    correlations["steps_sleep_efficiency"] = steps_efficiency_corr or 0
+
+    p_values["steps_total_sleep"] = steps_sleep_p or 1.0
+    p_values["steps_sleep_efficiency"] = steps_efficiency_p or 1.0
+
+    # Activity correlations
+    activity_deep_corr, activity_deep_p = calculate_correlation(
+        active.tolist(), deep_sleep.tolist()
+    )
+    activity_rem_corr, activity_rem_p = calculate_correlation(
+        active.tolist(), rem_sleep.tolist()
+    )
+
+    correlations["activity_deep_sleep"] = activity_deep_corr or 0
+    correlations["activity_rem_sleep"] = activity_rem_corr or 0
+
+    p_values["activity_deep_sleep"] = activity_deep_p or 1.0
+    p_values["activity_rem_sleep"] = activity_rem_p or 1.0
+
+    # Identify key insights from correlations
+    key_insights_dicts = find_key_insights(correlations, p_values)
+    key_insights = [InsightItem(**insight) for insight in key_insights_dicts[:3]]
 
     # Calculate variance explained
-    activity_deep_variance = calculate_variance_explained(active, deep_sleep)
+    activity_deep_variance = calculate_variance_explained(
+        active.tolist(), deep_sleep.tolist()
+    )
 
     # Calculate activity variability (day-to-day consistency)
-    day_to_day_variability = np.std(steps_arr, ddof=1) if len(steps) > 1 else 0.0
+    day_to_day_variability = float(np.std(steps, ddof=1)) if len(steps) > 1 else 0.0
+
+    # Detect activity trends
+    steps_trend, steps_p, steps_significant = detect_trend(steps.tolist())
+    active_trend, active_p, active_significant = detect_trend(active.tolist())
 
     # Calculate activity intensity score
-    avg_steps_value = np.mean(steps_arr) if steps else 0
-    avg_active_calories = np.mean(active_arr) if active else 0
+    avg_steps_value = float(np.mean(steps)) if len(steps) > 0 else 0
+    avg_active_calories = float(np.mean(active)) if len(active) > 0 else 0
     activity_intensity = calculate_activity_intensity_score(
         avg_steps_value, avg_active_calories
     )
 
-    return HealthStats(
-        avg_steps=avg_steps_value,
-        avg_active_energy_burned=avg_active_calories,
-        total_steps=int(np.sum(steps_arr)),
-        total_active_energy_burned=float(np.sum(active_arr)),
-        steps_total_sleep_correlation=steps_sleep_corr,
-        activity_deep_sleep_correlation=activity_deep_corr,
-        activity_deep_sleep_variance_explained=activity_deep_variance,
-        steps_sleep_efficiency_correlation=steps_efficiency_corr,
-        activity_rem_sleep_correlation=activity_rem_corr,
-        day_to_day_activity_variability=day_to_day_variability,
-        activity_intensity_score=activity_intensity,
-    )
+    # Build the stats dictionary with proper typing
+    stats_dict: HealthStatsDict = {
+        "avg_steps": avg_steps_value,
+        "avg_active_energy_burned": avg_active_calories,
+        "total_steps": int(np.sum(steps)),
+        "total_active_energy_burned": float(np.sum(active)),
+        "steps_total_sleep_correlation": correlations["steps_total_sleep"],
+        "activity_deep_sleep_correlation": correlations["activity_deep_sleep"],
+        "activity_deep_sleep_variance_explained": activity_deep_variance,
+        "steps_sleep_efficiency_correlation": correlations["steps_sleep_efficiency"],
+        "activity_rem_sleep_correlation": correlations["activity_rem_sleep"],
+        "day_to_day_activity_variability": day_to_day_variability,
+        "activity_intensity_score": activity_intensity,
+        # Additional statistics
+        "steps_trend": float(steps_trend),
+        "steps_trend_significant": bool(steps_significant),
+        "activity_trend": float(active_trend),
+        "activity_trend_significant": bool(active_significant),
+        "steps_min": float(np.min(steps)),
+        "steps_max": float(np.max(steps)),
+        "activity_min": float(np.min(active)),
+        "activity_max": float(np.max(active)),
+        "key_health_insights": key_insights,
+    }
+
+    return HealthStats(**stats_dict)
