@@ -5,8 +5,7 @@ or dependencies on external frameworks.
 """
 
 from typing import List, Optional, TypeVar, Dict
-import statistics
-import math
+import numpy as np
 from rolling_insights.models import (
     SleepMetrics,
     PhoneMetrics,
@@ -22,6 +21,8 @@ T = TypeVar("T")
 # Type alias for benchmark data structure
 BenchmarkType = Dict[str, float]
 
+# ==================== CONSTANTS ====================
+
 # Benchmark data (typical ranges for healthy adults)
 SLEEP_BENCHMARKS: Dict[str, BenchmarkType] = {
     "deep_sleep_percentage": {"min": 13.0, "max": 23.0, "median": 18.0},
@@ -30,29 +31,54 @@ SLEEP_BENCHMARKS: Dict[str, BenchmarkType] = {
     "screen_time_minutes": {"min": 60.0, "median": 180.0, "max": 300.0},
 }
 
+# Sleep quality score configuration
+SLEEP_QUALITY_WEIGHTS = {
+    "efficiency": 0.30,
+    "deep_sleep": 0.30,
+    "rem_sleep": 0.25,
+    "consistency": 0.15,
+}
+
+# Sleep quality thresholds
+SLEEP_QUALITY_THRESHOLDS = {
+    # Efficiency scoring thresholds (research shows 80% is minimum healthy)
+    "min_efficiency": 0.80,  # Minimum acceptable efficiency (was 0.7)
+    "optimal_efficiency": 0.95,  # Optimal efficiency target
+    # Deep sleep scoring (percentage of total sleep)
+    "min_deep_sleep_pct": 13.0,  # Min percentage for healthy deep sleep
+    "optimal_deep_sleep_pct": 20.0,  # Optimal deep sleep percentage
+    # REM sleep scoring
+    "min_rem_sleep_pct": 12.0,  # Min percentage for healthy REM sleep
+    "optimal_rem_sleep_pct": 20.0,  # Optimal REM sleep percentage
+    # Consistency scoring
+    "max_variability_minutes": 60.0,  # Maximum acceptable night-to-night variability
+}
+
+# Activity benchmarks
+ACTIVITY_BENCHMARKS = {
+    "daily_recommended_steps": 10000,  # WHO and CDC guideline
+    "daily_recommended_calories": 300,  # Average active calorie burn recommendation
+    "steps_weight": 0.6,  # Weight given to steps in activity score
+    "calories_weight": 0.4,  # Weight given to calories in activity score
+}
+
 
 def calculate_correlation(x: List[float], y: List[float]) -> Optional[float]:
     """Calculate Pearson correlation coefficient between two series."""
     if len(x) != len(y) or len(x) < 2:
         return None
 
-    # Pure Python implementation to avoid numpy dependency in domain layer
-    n = len(x)
-    sum_x = sum(x)
-    sum_y = sum(y)
-    sum_x_sq = sum(i**2 for i in x)
-    sum_y_sq = sum(i**2 for i in y)
+    # Convert to numpy arrays for vectorized operations
+    x_arr = np.array(x)
+    y_arr = np.array(y)
 
-    sum_xy = sum(x[i] * y[i] for i in range(n))
-
-    # Calculate Pearson correlation
-    numerator = n * sum_xy - sum_x * sum_y
-    denominator = math.sqrt((n * sum_x_sq - sum_x**2) * (n * sum_y_sq - sum_y**2))
-
-    if denominator == 0:
+    # Use numpy's corrcoef function which returns a correlation matrix
+    # We want the off-diagonal element [0,1] which is the correlation between x and y
+    corr_matrix = np.corrcoef(x_arr, y_arr)
+    if np.isnan(corr_matrix[0, 1]):
         return None
 
-    return numerator / denominator
+    return corr_matrix[0, 1]
 
 
 def calculate_variance_explained(x: List[float], y: List[float]) -> float:
@@ -96,22 +122,60 @@ def calculate_sleep_quality_score(stats: Dict[str, float]) -> float:
 
     The score is scaled from 0-100, with higher being better.
     """
-    # Weights for different components
-    weights = {
-        "efficiency": 0.3,
-        "deep_sleep": 0.3,
-        "rem_sleep": 0.25,
-        "consistency": 0.15,
-    }
+    # Get weights from constants
+    weights = SLEEP_QUALITY_WEIGHTS
+    thresholds = SLEEP_QUALITY_THRESHOLDS
 
     # Calculate component scores (0-100 scale)
-    efficiency_score = min(100, max(0, (stats["avg_sleep_efficiency"] - 0.7) * 333.3))
-    deep_score = min(100, max(0, stats["deep_sleep_percentage"] * 5))
-    rem_score = min(100, max(0, stats["rem_sleep_percentage"] * 5))
+    # Efficiency score: Linear scaling from min_efficiency to optimal_efficiency
+    efficiency_range = thresholds["optimal_efficiency"] - thresholds["min_efficiency"]
+    efficiency_score = min(
+        100,
+        max(
+            0,
+            (stats["avg_sleep_efficiency"] - thresholds["min_efficiency"])
+            * (100 / efficiency_range),
+        ),
+    )
 
-    # Lower variability is better (up to a point)
-    variability_factor = min(60, stats["sleep_duration_variability"]) / 60
-    consistency_score = 100 * (1 - variability_factor)
+    # Deep sleep score: Linear scaling from min to optimal percentage
+    deep_sleep_range = (
+        thresholds["optimal_deep_sleep_pct"] - thresholds["min_deep_sleep_pct"]
+    )
+    deep_score = min(
+        100,
+        max(
+            0,
+            (
+                (stats["deep_sleep_percentage"] - thresholds["min_deep_sleep_pct"])
+                / deep_sleep_range
+            )
+            * 100,
+        ),
+    )
+
+    # REM sleep score: Linear scaling from min to optimal percentage
+    rem_sleep_range = (
+        thresholds["optimal_rem_sleep_pct"] - thresholds["min_rem_sleep_pct"]
+    )
+    rem_score = min(
+        100,
+        max(
+            0,
+            (
+                (stats["rem_sleep_percentage"] - thresholds["min_rem_sleep_pct"])
+                / rem_sleep_range
+            )
+            * 100,
+        ),
+    )
+
+    # Consistency score: Lower variability is better (up to the defined threshold)
+    variability_ratio = (
+        min(stats["sleep_duration_variability"], thresholds["max_variability_minutes"])
+        / thresholds["max_variability_minutes"]
+    )
+    consistency_score = 100 * (1 - variability_ratio)
 
     # Weighted sum of components
     return (
@@ -126,17 +190,20 @@ def calculate_activity_intensity_score(avg_steps: float, avg_calories: float) ->
     """Calculate a score for physical activity intensity relative to recommendations.
 
     The score is scaled from 0-100, with 100 representing optimal activity.
+    Weights can be adjusted based on individual health goals.
     """
-    # Benchmarks based on general health recommendations
-    recommended_steps = 10000  # Daily recommended steps
-    recommended_active_calories = 300  # Daily active calorie burn for general health
+    # Get benchmarks from constants
+    recommended_steps = ACTIVITY_BENCHMARKS["daily_recommended_steps"]
+    recommended_active_calories = ACTIVITY_BENCHMARKS["daily_recommended_calories"]
+    steps_weight = ACTIVITY_BENCHMARKS["steps_weight"]
+    calories_weight = ACTIVITY_BENCHMARKS["calories_weight"]
 
     # Calculate component scores
     steps_score = min(100, (avg_steps / recommended_steps) * 100)
     calorie_score = min(100, (avg_calories / recommended_active_calories) * 100)
 
-    # Combined score with equal weights
-    return (steps_score + calorie_score) / 2
+    # Combined score with weighted components
+    return (steps_weight * steps_score) + (calories_weight * calorie_score)
 
 
 def calculate_sleep_stats(metrics: List[SleepMetrics]) -> SleepStats:
@@ -147,13 +214,20 @@ def calculate_sleep_stats(metrics: List[SleepMetrics]) -> SleepStats:
     light = [m.light_sleep_minutes for m in metrics]
     eff = [m.sleep_efficiency for m in metrics]
 
-    total_minutes = sum(tot)
-    deep_sleep_pct = sum(deep) / total_minutes * 100 if total_minutes else 0
-    rem_sleep_pct = sum(rem) / total_minutes * 100 if total_minutes else 0
-    light_sleep_pct = sum(light) / total_minutes * 100 if total_minutes else 0
+    # Convert to numpy arrays for vectorized operations
+    tot_arr = np.array(tot)
+    deep_arr = np.array(deep)
+    rem_arr = np.array(rem)
+    light_arr = np.array(light)
+    eff_arr = np.array(eff)
+
+    total_minutes = np.sum(tot_arr)
+    deep_sleep_pct = np.sum(deep_arr) / total_minutes * 100 if total_minutes else 0
+    rem_sleep_pct = np.sum(rem_arr) / total_minutes * 100 if total_minutes else 0
+    light_sleep_pct = np.sum(light_arr) / total_minutes * 100 if total_minutes else 0
 
     # Calculate sleep duration variability (standard deviation)
-    sleep_duration_variability = statistics.stdev(tot) if len(tot) > 1 else 0.0
+    sleep_duration_variability = np.std(tot_arr, ddof=1) if len(tot) > 1 else 0.0
 
     # Calculate percentile rankings
     deep_sleep_percentile = calculate_percentile(
@@ -163,17 +237,17 @@ def calculate_sleep_stats(metrics: List[SleepMetrics]) -> SleepStats:
         rem_sleep_pct, SLEEP_BENCHMARKS["rem_sleep_percentage"]
     )
     sleep_efficiency_percentile = calculate_percentile(
-        statistics.mean(eff), SLEEP_BENCHMARKS["sleep_efficiency"]
+        np.mean(eff_arr), SLEEP_BENCHMARKS["sleep_efficiency"]
     )
 
     stats_dict = {
-        "avg_total_sleep_minutes": statistics.mean(tot),
-        "avg_deep_sleep_minutes": statistics.mean(deep),
-        "avg_rem_sleep_minutes": statistics.mean(rem),
-        "avg_light_sleep_minutes": statistics.mean(light),
-        "avg_sleep_efficiency": statistics.mean(eff),
-        "min_total_sleep_minutes": min(tot),
-        "max_total_sleep_minutes": max(tot),
+        "avg_total_sleep_minutes": np.mean(tot_arr),
+        "avg_deep_sleep_minutes": np.mean(deep_arr),
+        "avg_rem_sleep_minutes": np.mean(rem_arr),
+        "avg_light_sleep_minutes": np.mean(light_arr),
+        "avg_sleep_efficiency": np.mean(eff_arr),
+        "min_total_sleep_minutes": np.min(tot_arr),
+        "max_total_sleep_minutes": np.max(tot_arr),
         "deep_sleep_percentage": deep_sleep_pct,
         "rem_sleep_percentage": rem_sleep_pct,
         "light_sleep_percentage": light_sleep_pct,
@@ -199,6 +273,11 @@ def calculate_phone_stats(
     screen_bed = [float(m.screen_time_before_bed_minutes) for m in metrics]
     first_pickup = [float(m.first_pickup_after_wakeup_minutes) for m in metrics]
 
+    # Convert to numpy arrays
+    screen_arr = np.array(screen)
+    pickups_arr = np.array(pickups)
+    screen_bed_arr = np.array(screen_bed)
+
     # Calculate correlations with sleep
     total_sleep = [m.total_sleep_minutes for m in sleep_metrics]
     deep_sleep = [m.deep_sleep_minutes for m in sleep_metrics]
@@ -220,18 +299,17 @@ def calculate_phone_stats(
 
     # Calculate screen time percentile
     screen_time_percentile = calculate_percentile(
-        statistics.mean(screen), SLEEP_BENCHMARKS["screen_time_minutes"]
+        np.mean(screen_arr), SLEEP_BENCHMARKS["screen_time_minutes"]
     )
 
     return PhoneStats(
-        avg_screen_time_minutes=statistics.mean(screen),
-        avg_pickups=statistics.mean(pickups),
-        avg_screen_before_bed_minutes=statistics.mean(screen_bed),
-        total_screen_time_minutes=sum([m.screen_time_minutes for m in metrics]),
-        total_pickups=sum([m.pickups for m in metrics]),
+        avg_screen_time_minutes=np.mean(screen_arr),
+        avg_pickups=np.mean(pickups_arr),
+        avg_screen_before_bed_minutes=np.mean(screen_bed_arr),
+        total_screen_time_minutes=np.sum(screen_arr),
+        total_pickups=int(np.sum(pickups_arr)),
         screen_before_bed_total_sleep_correlation=screen_bed_total_corr,
         screen_before_bed_deep_sleep_correlation=screen_bed_deep_corr,
-        # New metrics
         screen_before_bed_total_sleep_variance_explained=screen_bed_total_variance,
         screen_before_bed_deep_sleep_variance_explained=screen_bed_deep_variance,
         screen_time_percentile=screen_time_percentile,
@@ -247,6 +325,10 @@ def calculate_health_stats(
     """Calculate statistical measures from health metrics."""
     steps = [float(m.total_steps) for m in metrics]
     active = [float(m.active_energy_burned) for m in metrics]
+
+    # Convert to numpy arrays
+    steps_arr = np.array(steps)
+    active_arr = np.array(active)
 
     # Calculate correlations with sleep
     total_sleep = [m.total_sleep_minutes for m in sleep_metrics]
@@ -266,11 +348,11 @@ def calculate_health_stats(
     activity_deep_variance = calculate_variance_explained(active, deep_sleep)
 
     # Calculate activity variability (day-to-day consistency)
-    day_to_day_variability = statistics.stdev(steps) if len(steps) > 1 else 0.0
+    day_to_day_variability = np.std(steps_arr, ddof=1) if len(steps) > 1 else 0.0
 
     # Calculate activity intensity score
-    avg_steps_value = statistics.mean(steps) if steps else 0
-    avg_active_calories = statistics.mean(active) if active else 0
+    avg_steps_value = np.mean(steps_arr) if steps else 0
+    avg_active_calories = np.mean(active_arr) if active else 0
     activity_intensity = calculate_activity_intensity_score(
         avg_steps_value, avg_active_calories
     )
@@ -278,11 +360,10 @@ def calculate_health_stats(
     return HealthStats(
         avg_steps=avg_steps_value,
         avg_active_energy_burned=avg_active_calories,
-        total_steps=sum([m.total_steps for m in metrics]),
-        total_active_energy_burned=sum([m.active_energy_burned for m in metrics]),
+        total_steps=int(np.sum(steps_arr)),
+        total_active_energy_burned=float(np.sum(active_arr)),
         steps_total_sleep_correlation=steps_sleep_corr,
         activity_deep_sleep_correlation=activity_deep_corr,
-        # New metrics
         activity_deep_sleep_variance_explained=activity_deep_variance,
         steps_sleep_efficiency_correlation=steps_efficiency_corr,
         activity_rem_sleep_correlation=activity_rem_corr,
