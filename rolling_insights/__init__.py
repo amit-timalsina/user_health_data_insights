@@ -19,6 +19,16 @@ Key features:
 - Natural language narrative insights powered by LLMs
 - Comprehensive 7-day rolling analysis window
 
-The codebase is organized into logical layers including models, analytics, services, and
-external integrations to maintain a clean and maintainable structure.
+The codebase is organized into logical layers including models, analytics, and services to
+maintain a clean and maintainable structure.
 """
+
+from rolling_insights.services.insights.all_insights_service import AllInsightsService
+from rolling_insights.services.llm_service import LLMService
+from rolling_insights.services.json_file_service import JsonFileService
+
+__all__ = (
+    "AllInsightsService",
+    "JsonFileService",
+    "LLMService",
+)

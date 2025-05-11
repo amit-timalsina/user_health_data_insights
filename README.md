@@ -63,39 +63,6 @@ requirements.txt         # Dependencies
 - AI-generated narrative insights using OpenAI's GPT models
 - Hybrid architecture implementation for maintainability and intuitive organization
 
-## Architecture
-
-This project follows a hybrid architecture that combines intuitive naming with clean architecture principles:
-
-1. **Models** - Core data structures using Pydantic
-   - Located in `rolling_insights/models/`
-   - Contains schema definitions with validation
-
-2. **Analytics** - Statistical calculations and algorithms
-   - Located in `rolling_insights/analytics/`
-   - Pure functions for data analysis
-
-3. **Services** - Business logic coordination
-   - Located in `rolling_insights/services/`
-   - Orchestrates the flow between models, analytics, and external services
-
-4. **External** - Interface adapters for external systems
-   - Located in `rolling_insights/external/`
-   - Handles AI services and storage operations
-
-5. **Utils** - Common utilities and helpers
-   - Located in `rolling_insights/utils/`
-   - Reusable functions used across the application
-
-6. **Exceptions** - Custom error types
-   - Located in `rolling_insights/exceptions/`
-   - Specialized error classes for better error handling
-
-This hybrid approach makes the codebase:
-- More intuitive for new developers
-- Better organized by logical function
-- Still maintainable with proper separation of concerns
-
 ## Output Samples
 
 Each generated insight file contains:
