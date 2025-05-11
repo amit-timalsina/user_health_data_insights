@@ -37,7 +37,7 @@ artifacts/
 
 # Generated files
 *.json
-!user_0e7f18ae_2025-03-24_to_2025-03-30.json
+user_0e7f18ae_2025-03-24_to_2025-03-30.json
 
 # OS files
 .DS_Store
