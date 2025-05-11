@@ -115,27 +115,55 @@ class AllInsightsService:
         # Calculate cross-metric correlations
         cross_correlations = {
             # Phone impact on specific sleep phases
-            "phone_screen_deep_sleep_corr": calculate_correlation(
-                phone_screen, sleep_deep
-            )
-            or 0,
-            "phone_screen_rem_sleep_corr": calculate_correlation(
-                phone_screen, sleep_rem
-            )
-            or 0,
-            "pickups_deep_sleep_corr": calculate_correlation(phone_pickups, sleep_deep)
-            or 0,
+            "phone_screen_deep_sleep_corr": 0.0,
+            "phone_screen_rem_sleep_corr": 0.0,
+            "pickups_deep_sleep_corr": 0.0,
             # Health impact on specific sleep phases
-            "steps_deep_sleep_corr": calculate_correlation(steps, sleep_deep) or 0,
-            "steps_rem_sleep_corr": calculate_correlation(steps, sleep_rem) or 0,
-            "activity_sleep_efficiency_corr": calculate_correlation(
-                active_energy, sleep_efficiency
-            )
-            or 0,
+            "steps_deep_sleep_corr": 0.0,
+            "steps_rem_sleep_corr": 0.0,
+            "activity_sleep_efficiency_corr": 0.0,
             # Phone-health correlations
-            "phone_activity_corr": calculate_correlation(phone_screen, active_energy)
-            or 0,
+            "phone_activity_corr": 0.0,
         }
+
+        # Phone impact on specific sleep phases
+        phone_screen_deep_result = calculate_correlation(phone_screen, sleep_deep)
+        if phone_screen_deep_result:
+            cross_correlations["phone_screen_deep_sleep_corr"] = (
+                phone_screen_deep_result[0]
+            )
+
+        phone_screen_rem_result = calculate_correlation(phone_screen, sleep_rem)
+        if phone_screen_rem_result:
+            cross_correlations["phone_screen_rem_sleep_corr"] = phone_screen_rem_result[
+                0
+            ]
+
+        pickups_deep_result = calculate_correlation(phone_pickups, sleep_deep)
+        if pickups_deep_result:
+            cross_correlations["pickups_deep_sleep_corr"] = pickups_deep_result[0]
+
+        # Health impact on specific sleep phases
+        steps_deep_result = calculate_correlation(steps, sleep_deep)
+        if steps_deep_result:
+            cross_correlations["steps_deep_sleep_corr"] = steps_deep_result[0]
+
+        steps_rem_result = calculate_correlation(steps, sleep_rem)
+        if steps_rem_result:
+            cross_correlations["steps_rem_sleep_corr"] = steps_rem_result[0]
+
+        activity_sleep_eff_result = calculate_correlation(
+            active_energy, sleep_efficiency
+        )
+        if activity_sleep_eff_result:
+            cross_correlations["activity_sleep_efficiency_corr"] = (
+                activity_sleep_eff_result[0]
+            )
+
+        # Phone-health correlations
+        phone_activity_result = calculate_correlation(phone_screen, active_energy)
+        if phone_activity_result:
+            cross_correlations["phone_activity_corr"] = phone_activity_result[0]
 
         # Calculate variance explained
         variance_explained = {

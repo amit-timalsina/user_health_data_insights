@@ -77,14 +77,14 @@ SIGNIFICANCE_THRESHOLD = 0.1  # More permissive for small sample size (7 days)
 
 def calculate_correlation(
     x: List[float], y: List[float]
-) -> Tuple[Optional[float], Optional[float]]:
+) -> Optional[Tuple[float, float]]:
     """Calculate Pearson correlation coefficient between two series with p-value.
 
     Returns:
         Tuple containing (correlation coefficient, p-value)
     """
     if len(x) != len(y) or len(x) < 2:
-        return None, None
+        return None
 
     # Convert to numpy arrays for better statistical computation
     x_arr = np.array(x, dtype=float)
@@ -93,7 +93,8 @@ def calculate_correlation(
     # Calculate correlation and p-value
     corr, p_value = stats.pearsonr(x_arr, y_arr)
 
-    return corr, p_value
+    # Convert numpy values to regular Python floats
+    return float(corr), float(p_value)
 
 
 def calculate_variance_explained(x: List[float], y: List[float]) -> float:
@@ -101,9 +102,11 @@ def calculate_variance_explained(x: List[float], y: List[float]) -> float:
 
     This represents the proportion of variance in y explained by x.
     """
-    corr, _ = calculate_correlation(x, y)
-    if corr is None:
+    result = calculate_correlation(x, y)
+    if result is None:
         return 0.0
+
+    corr, _ = result
     # R-squared is the square of the correlation coefficient
     return corr**2
 
@@ -535,37 +538,60 @@ def calculate_phone_stats(
     p_values: Dict[str, float] = {}
 
     # Screen time before bed correlations
-    screen_bed_total_corr, screen_bed_total_p = calculate_correlation(
+    screen_bed_total_result = calculate_correlation(
         screen_bed.tolist(), total_sleep.tolist()
     )
-    screen_bed_deep_corr, screen_bed_deep_p = calculate_correlation(
+    screen_bed_deep_result = calculate_correlation(
         screen_bed.tolist(), deep_sleep.tolist()
     )
-    screen_bed_rem_corr, screen_bed_rem_p = calculate_correlation(
+    screen_bed_rem_result = calculate_correlation(
         screen_bed.tolist(), rem_sleep.tolist()
     )
 
-    correlations["screen_time_before_bed_total_sleep"] = screen_bed_total_corr or 0
-    correlations["screen_time_before_bed_deep_sleep"] = screen_bed_deep_corr or 0
-    correlations["screen_time_before_bed_rem_sleep"] = screen_bed_rem_corr or 0
+    correlations["screen_time_before_bed_total_sleep"] = 0
+    correlations["screen_time_before_bed_deep_sleep"] = 0
+    correlations["screen_time_before_bed_rem_sleep"] = 0
 
-    p_values["screen_time_before_bed_total_sleep"] = screen_bed_total_p or 1.0
-    p_values["screen_time_before_bed_deep_sleep"] = screen_bed_deep_p or 1.0
-    p_values["screen_time_before_bed_rem_sleep"] = screen_bed_rem_p or 1.0
+    p_values["screen_time_before_bed_total_sleep"] = 1.0
+    p_values["screen_time_before_bed_deep_sleep"] = 1.0
+    p_values["screen_time_before_bed_rem_sleep"] = 1.0
+
+    if screen_bed_total_result:
+        screen_bed_total_corr, screen_bed_total_p = screen_bed_total_result
+        correlations["screen_time_before_bed_total_sleep"] = screen_bed_total_corr
+        p_values["screen_time_before_bed_total_sleep"] = screen_bed_total_p
+
+    if screen_bed_deep_result:
+        screen_bed_deep_corr, screen_bed_deep_p = screen_bed_deep_result
+        correlations["screen_time_before_bed_deep_sleep"] = screen_bed_deep_corr
+        p_values["screen_time_before_bed_deep_sleep"] = screen_bed_deep_p
+
+    if screen_bed_rem_result:
+        screen_bed_rem_corr, screen_bed_rem_p = screen_bed_rem_result
+        correlations["screen_time_before_bed_rem_sleep"] = screen_bed_rem_corr
+        p_values["screen_time_before_bed_rem_sleep"] = screen_bed_rem_p
 
     # Other correlations
-    pickups_sleep_corr, pickups_sleep_p = calculate_correlation(
-        pickups.tolist(), total_sleep.tolist()
-    )
-    morning_pickup_corr, morning_pickup_p = calculate_correlation(
+    pickups_sleep_result = calculate_correlation(pickups.tolist(), total_sleep.tolist())
+    morning_pickup_result = calculate_correlation(
         first_pickup.tolist(), sleep_efficiency.tolist()
     )
 
-    correlations["pickups_total_sleep"] = pickups_sleep_corr or 0
-    correlations["morning_pickup_sleep_efficiency"] = morning_pickup_corr or 0
+    correlations["pickups_total_sleep"] = 0
+    correlations["morning_pickup_sleep_efficiency"] = 0
 
-    p_values["pickups_total_sleep"] = pickups_sleep_p or 1.0
-    p_values["morning_pickup_sleep_efficiency"] = morning_pickup_p or 1.0
+    p_values["pickups_total_sleep"] = 1.0
+    p_values["morning_pickup_sleep_efficiency"] = 1.0
+
+    if pickups_sleep_result:
+        pickups_sleep_corr, pickups_sleep_p = pickups_sleep_result
+        correlations["pickups_total_sleep"] = pickups_sleep_corr
+        p_values["pickups_total_sleep"] = pickups_sleep_p
+
+    if morning_pickup_result:
+        morning_pickup_corr, morning_pickup_p = morning_pickup_result
+        correlations["morning_pickup_sleep_efficiency"] = morning_pickup_corr
+        p_values["morning_pickup_sleep_efficiency"] = morning_pickup_p
 
     # Identify key insights from correlations
     key_insights_dicts = find_key_insights(correlations, p_values)
@@ -644,32 +670,46 @@ def calculate_health_stats(
     p_values: Dict[str, float] = {}
 
     # Steps correlations
-    steps_sleep_corr, steps_sleep_p = calculate_correlation(
-        steps.tolist(), total_sleep.tolist()
-    )
-    steps_efficiency_corr, steps_efficiency_p = calculate_correlation(
+    steps_sleep_result = calculate_correlation(steps.tolist(), total_sleep.tolist())
+    steps_efficiency_result = calculate_correlation(
         steps.tolist(), sleep_efficiency.tolist()
     )
 
-    correlations["steps_total_sleep"] = steps_sleep_corr or 0
-    correlations["steps_sleep_efficiency"] = steps_efficiency_corr or 0
+    correlations["steps_total_sleep"] = 0
+    correlations["steps_sleep_efficiency"] = 0
 
-    p_values["steps_total_sleep"] = steps_sleep_p or 1.0
-    p_values["steps_sleep_efficiency"] = steps_efficiency_p or 1.0
+    p_values["steps_total_sleep"] = 1.0
+    p_values["steps_sleep_efficiency"] = 1.0
+
+    if steps_sleep_result:
+        steps_sleep_corr, steps_sleep_p = steps_sleep_result
+        correlations["steps_total_sleep"] = steps_sleep_corr
+        p_values["steps_total_sleep"] = steps_sleep_p
+
+    if steps_efficiency_result:
+        steps_efficiency_corr, steps_efficiency_p = steps_efficiency_result
+        correlations["steps_sleep_efficiency"] = steps_efficiency_corr
+        p_values["steps_sleep_efficiency"] = steps_efficiency_p
 
     # Activity correlations
-    activity_deep_corr, activity_deep_p = calculate_correlation(
-        active.tolist(), deep_sleep.tolist()
-    )
-    activity_rem_corr, activity_rem_p = calculate_correlation(
-        active.tolist(), rem_sleep.tolist()
-    )
+    activity_deep_result = calculate_correlation(active.tolist(), deep_sleep.tolist())
+    activity_rem_result = calculate_correlation(active.tolist(), rem_sleep.tolist())
 
-    correlations["activity_deep_sleep"] = activity_deep_corr or 0
-    correlations["activity_rem_sleep"] = activity_rem_corr or 0
+    correlations["activity_deep_sleep"] = 0
+    correlations["activity_rem_sleep"] = 0
 
-    p_values["activity_deep_sleep"] = activity_deep_p or 1.0
-    p_values["activity_rem_sleep"] = activity_rem_p or 1.0
+    p_values["activity_deep_sleep"] = 1.0
+    p_values["activity_rem_sleep"] = 1.0
+
+    if activity_deep_result:
+        activity_deep_corr, activity_deep_p = activity_deep_result
+        correlations["activity_deep_sleep"] = activity_deep_corr
+        p_values["activity_deep_sleep"] = activity_deep_p
+
+    if activity_rem_result:
+        activity_rem_corr, activity_rem_p = activity_rem_result
+        correlations["activity_rem_sleep"] = activity_rem_corr
+        p_values["activity_rem_sleep"] = activity_rem_p
 
     # Identify key insights from correlations
     key_insights_dicts = find_key_insights(correlations, p_values)
