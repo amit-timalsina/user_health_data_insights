@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python build_insights.py --input INPUT_JSON_FILE_PATH
 ```
 
-This processes the data in `samples/` and outputs three JSON files to the `insights/` directory:
+This processes the data in `INPUT_JSON_FILE_PATH` and outputs three JSON files to the `insights/` directory:
 - `sleepInsights.json` - Analysis of deep sleep, REM, efficiency, and latency
 - `phoneUsage.json` - Screen time, pickups, and sleep impact analysis
 - `healthInsights.json` - Vitals, activity load, and recovery analysis
