@@ -9,7 +9,7 @@ git clone <repository-url>
 cd rolling-insights
 ```
 
-Make a virtual env.
+Make a virtual env. Then,
 ```bash
 pip install -r requirements.txt
 ```
