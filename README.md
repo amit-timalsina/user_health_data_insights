@@ -14,12 +14,14 @@ Make a virtual env. Then,
 pip install -r requirements.txt
 ```
 
+
 ## Usage
 
-Run the script to generate insights:
+1. Create .env file based on `.env.example`.
+2. Run the script to generate insights:
 
 ```bash
-python build_insights.py
+python build_insights.py --input INPUT_JSON_FILE_PATH
 ```
 
 This processes the data in `samples/` and outputs three JSON files to the `insights/` directory:
@@ -38,7 +40,7 @@ This project uses OpenAI's API to generate narrative insights. The system:
 Environment variables for LLM integration:
 ```
 OPENAI_API_KEY=your_api_key_here
-OPENAI_MODEL=gpt-4o-mini  # Optional, defaults to gpt-4o-mini
+OPENAI_MODEL=gpt-4.1  # Optional, defaults to gpt-4.1
 ```
 
 ## Project Structure
@@ -94,7 +96,3 @@ Example of sleepInsights.json:
   "narrative_insights": "Your deep sleep duration of 135 minutes per night exceeds the adult average of 90 minutes, suggesting excellent slow-wave sleep that contributes to memory consolidation and cellular repair. Your sleep efficiency of 92% is exceptional, indicating minimal disruptions once asleep..."
 }
 ```
-
-## License
-
-[MIT License](LICENSE) 

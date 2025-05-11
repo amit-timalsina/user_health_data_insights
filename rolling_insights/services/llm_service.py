@@ -20,7 +20,7 @@ class LLMService:
 
     FALLBACK_NARRATIVE = "AI service unavailable – no narrative generated."
     MAX_RETRIES = 3
-    DEFAULT_MODEL = "gpt-4o-mini"
+    DEFAULT_MODEL = "gpt-4.1"
 
     # Define client at class level with proper typing
     client: Any  # Using Any to avoid complex conditional typing
