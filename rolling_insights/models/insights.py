@@ -4,7 +4,7 @@ Insights system.
 """
 
 from datetime import date
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Optional, Union
 from pydantic import BaseModel, Field
 
 
@@ -139,6 +139,7 @@ class SleepInsightPayload(BaseInsightPayload):
 
     stats: SleepStats
     daily_data: List[Dict[str, Any]]
+    cross_metric_analysis: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation for serialization."""

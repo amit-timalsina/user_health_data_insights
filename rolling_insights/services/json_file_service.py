@@ -5,8 +5,19 @@ raw data and saving processed insights.
 """
 
 import json
+from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Any, Union
+
+from rolling_insights.models.insights import InsightPayload
+
+
+# Custom JSON encoder to handle date objects
+class DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (date, datetime)):
+            return obj.isoformat()
+        return super().default(obj)
 
 
 class JsonFileService:
@@ -23,7 +34,7 @@ class JsonFileService:
             return json.load(file)
 
     @staticmethod
-    def save_insights(insights: Dict[str, Any], filepath: Union[str, Path]) -> None:
+    def save_insights(insights: InsightPayload, filepath: Union[str, Path]) -> None:
         """Save insight data to the specified JSON file path."""
         filepath = Path(filepath)
 
@@ -31,7 +42,10 @@ class JsonFileService:
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
         with open(filepath, "w") as file:
-            json.dump(insights, file, indent=2)
+            # Use model_dump with appropriate parameters for date serialization
+            json.dump(
+                insights.model_dump(mode="json"), file, indent=2, cls=DateTimeEncoder
+            )
 
     @staticmethod
     def ensure_directory(directory: Union[str, Path]) -> Path:
